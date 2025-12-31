@@ -20,8 +20,10 @@ use embedded_hal_bus::i2c::RcDevice;
 use esp_backtrace as _;
 use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Input, InputConfig, InputPin};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::timer::timg::TimerGroup;
+use lcd_lcm1602_i2c::sync_lcd::Lcd;
 use scd4x::Scd4x;
 use static_cell::StaticCell;
 
@@ -46,6 +48,7 @@ enum Events {
         temperature: f32,
         humidity: f32,
     },
+    ButtonPress,
 }
 
 static CHANNEL: StaticCell<Channel<NoopRawMutex, Events, 1>> = StaticCell::new();
@@ -75,6 +78,11 @@ async fn main(spawner: Spawner) {
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
 
+    let button_pin = Input::new(
+        peripherals.GPIO23,
+        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
+    );
+
     let i2c_v33 = I2c::new(peripherals.I2C0, I2cConfig::default())
         .unwrap()
         .with_scl(peripherals.GPIO22)
@@ -99,6 +107,9 @@ async fn main(spawner: Spawner) {
             RcDevice::new(shared_i2c_v33.clone()),
             channel.sender(),
         ))
+        .unwrap();
+    spawner
+        .spawn(listen_button(button_pin, channel.sender()))
         .unwrap();
     spawner
         .spawn(display_data(i2c_v5, channel.receiver()))
@@ -144,12 +155,7 @@ async fn read_scd_41(
     sensor.stop_periodic_measurement().unwrap();
     sensor.reinit().unwrap();
 
-    let serial = sensor.serial_number().unwrap();
-    esp_println::println!("serial: {serial:#04x}");
-
     sensor.start_periodic_measurement().unwrap();
-    esp_println::println!("Waiting for first measurement... (5 sec)");
-
     loop {
         Timer::after(Duration::from_secs(5)).await;
 
@@ -165,25 +171,95 @@ async fn read_scd_41(
 }
 
 #[embassy_executor::task]
+async fn listen_button(mut pin: Input<'static>, sender: Sender<'static, NoopRawMutex, Events, 1>) {
+    loop {
+        pin.wait_for_high().await;
+        pin.wait_for_low().await;
+
+        sender.send(Events::ButtonPress).await;
+    }
+}
+
+struct Data {
+    temp: f32,
+    humidity: f32,
+    pressure: f32,
+    gas_resistance: f32,
+    co2: u16,
+}
+
+enum DisplayMode {
+    Temperature,
+    Humidity,
+    Pressure,
+    GasResistance,
+    CO2,
+}
+
+impl DisplayMode {
+    fn display(&self, data: &Data, lcd: &mut Lcd<'_, I2c<'static, Blocking>, Delay>) {
+        match self {
+            DisplayMode::Temperature => {
+                lcd.clear().unwrap();
+                lcd.write_str("Temperature").unwrap();
+                lcd.set_cursor(1, 0).unwrap();
+                lcd.write_str(&data.temp.to_string()).unwrap();
+                lcd.write_str("C").unwrap();
+            }
+            DisplayMode::Humidity => {
+                lcd.clear().unwrap();
+                lcd.write_str("Humidity").unwrap();
+                lcd.set_cursor(1, 0).unwrap();
+                lcd.write_str(&data.humidity.to_string()).unwrap();
+                lcd.write_str("%").unwrap();
+            }
+            DisplayMode::Pressure => {
+                lcd.clear().unwrap();
+                lcd.write_str("Pressure").unwrap();
+                lcd.set_cursor(1, 0).unwrap();
+                lcd.write_str(&data.pressure.to_string()).unwrap();
+                lcd.write_str("hPa").unwrap();
+            }
+            DisplayMode::GasResistance => {
+                lcd.clear().unwrap();
+                lcd.write_str("Gas Resistance").unwrap();
+                lcd.set_cursor(1, 0).unwrap();
+                lcd.write_str(&data.gas_resistance.to_string()).unwrap();
+                lcd.write_str("Ohm").unwrap();
+            }
+            DisplayMode::CO2 => {
+                lcd.clear().unwrap();
+                lcd.write_str("CO2").unwrap();
+                lcd.set_cursor(1, 0).unwrap();
+                lcd.write_str(&data.co2.to_string()).unwrap();
+                lcd.write_str("ppm").unwrap();
+            }
+        }
+    }
+
+    fn next(self) -> DisplayMode {
+        match self {
+            DisplayMode::Temperature => DisplayMode::Humidity,
+            DisplayMode::Humidity => DisplayMode::Pressure,
+            DisplayMode::Pressure => DisplayMode::GasResistance,
+            DisplayMode::GasResistance => DisplayMode::CO2,
+            DisplayMode::CO2 => DisplayMode::Temperature,
+        }
+    }
+}
+
+#[embassy_executor::task]
 async fn display_data(
     mut i2c: I2c<'static, Blocking>,
     receiver: Receiver<'static, NoopRawMutex, Events, 1>,
 ) {
     let mut delay = Delay;
-    let mut lcd = lcd_lcm1602_i2c::sync_lcd::Lcd::new(&mut i2c, &mut delay)
+    let mut lcd = Lcd::new(&mut i2c, &mut delay)
         .with_address(0x27)
         .with_cursor_on(false)
         .with_rows(2)
         .init()
         .unwrap();
-
-    struct Data {
-        temp: f32,
-        humidity: f32,
-        pressure: f32,
-        gas_resistance: f32,
-        co2: u16,
-    }
 
     let mut data = Data {
         temp: 0.0,
@@ -192,6 +268,7 @@ async fn display_data(
         gas_resistance: 0.0,
         co2: 0,
     };
+    let mut mode = DisplayMode::Temperature;
 
     loop {
         match receiver.receive().await {
@@ -209,10 +286,11 @@ async fn display_data(
             Events::SCD41 { co2, .. } => {
                 data.co2 = co2;
             }
+            Events::ButtonPress => {
+                mode = mode.next();
+            }
         }
 
-        lcd.clear().unwrap();
-        lcd.write_str("temp:").unwrap();
-        lcd.write_str(&data.temp.to_string()).unwrap();
+        mode.display(&data, &mut lcd);
     }
 }
