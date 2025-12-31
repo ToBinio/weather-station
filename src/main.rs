@@ -11,8 +11,8 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::timer::timg::TimerGroup;
-use log::info;
 
 extern crate alloc;
 
@@ -25,7 +25,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     reason = "it's not unusual to allocate larger buffers etc. in main"
 )]
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(spawner: Spawner) {
     // generator version: 1.1.0
 
     esp_println::logger::init_logger_from_env();
@@ -35,23 +35,25 @@ async fn main(spawner: Spawner) -> ! {
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
 
+    let pin = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    info!("Embassy initialized!");
+    esp_println::println!("Embassy initialized!");
 
     let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
     let (mut _wifi_controller, _interfaces) =
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
 
-    // TODO: Spawn some tasks
-    let _ = spawner;
+    spawner.spawn(flash_led(pin)).unwrap();
+}
 
+#[embassy_executor::task]
+async fn flash_led(mut pin: Output<'static>) {
     loop {
-        info!("Hello world!");
+        pin.toggle();
         Timer::after(Duration::from_secs(1)).await;
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v~1.0/examples
 }

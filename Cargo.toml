@@ -6,7 +6,7 @@ version      = "0.1.0"
 
 [[bin]]
 name = "weather-station"
-path = "./src/bin/main.rs"
+path = "./src/main.rs"
 
 # Overwrite because of https://github.com/esp-rs/esp-hal/issues/4545
 [patch.crates-io]
@@ -24,7 +24,6 @@ esp-rtos = { version = "0.2.0", features = [
 ] }
 
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32", "log-04"] }
-log                    = "0.4.27"
 
 embassy-net = { version = "0.7.1", features = [
   "dhcpv4",
