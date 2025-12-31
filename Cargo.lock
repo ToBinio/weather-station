@@ -1315,10 +1315,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a50f4cf475b65d88e057964e0e9bb1f0aa9bbb2036dc65c64596b42932536984"
 
 [[package]]
+name = "scd4x"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "455974f1daa137284e9e282362d1074f004028a77ee84c6bb1508c9e89646153"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "log",
+ "sensirion-i2c",
+]
+
+[[package]]
 name = "semihosting"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5669d73a3503b5d34db3359c8c87d1b33ba68b2630c153e340d106c15a8626a7"
+
+[[package]]
+name = "sensirion-i2c"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "640a03c95c176226cf159ae2727f7fe3245546022639d61459af46d2878aec06"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "serde"
@@ -1607,6 +1627,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "lcd-lcm1602-i2c",
+ "scd4x",
 ]
 
 [[package]]

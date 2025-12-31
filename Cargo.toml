@@ -52,10 +52,11 @@ esp-radio = { version = "0.17.0", features = [
 
 critical-section = "1.2.0"
 
-# Custom
+#Custom
 bosch-bme680 = "1.0.4"
 lcd-lcm1602-i2c = "0.3.0"
-embedded-hal-bus = { version = "0.3.0" }
+embedded-hal-bus = { version = "0.3.0", features = ["alloc"] }
+scd4x = { version = "0.4.1", features = ["scd41"] }
 
 [profile.dev]
 # Rust debug is too slow.
