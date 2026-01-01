@@ -20,7 +20,7 @@ use embedded_hal_bus::i2c::RcDevice;
 use esp_backtrace as _;
 use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Input, InputConfig, InputPin};
+use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::timer::timg::TimerGroup;
 use lcd_lcm1602_i2c::sync_lcd::Lcd;
@@ -36,16 +36,23 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[derive(Debug)]
-enum Events {
+pub enum Events {
     BME680 {
+        // Temperature in Celsius
         temp: f32,
+        // Relative humidity in %
         humidity: f32,
+        // Pressure in Pa
         pressure: f32,
+        // Gas resistance in Ohms
         gas_resistance: f32,
     },
     SCD41 {
+        // CO2 concentration in ppm
         co2: u16,
+        // Temperature in Celsius
         temperature: f32,
+        // Relative humidity in %
         humidity: f32,
     },
     ButtonPress,
@@ -71,12 +78,14 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    esp_println::println!("Embassy initialized!");
+    esp_println::println!("RTOS initialized!");
 
     let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
     let (mut _wifi_controller, _interfaces) =
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
             .expect("Failed to initialize Wi-Fi controller");
+
+    esp_println::println!("WiFi initialized!");
 
     let button_pin = Input::new(
         peripherals.GPIO23,
@@ -94,26 +103,28 @@ async fn main(spawner: Spawner) {
         .with_scl(peripherals.GPIO26)
         .with_sda(peripherals.GPIO25);
 
-    let channel = CHANNEL.init(Channel::new());
+    let event_channel = CHANNEL.init(Channel::new());
 
     spawner
         .spawn(read_bme_680(
             RcDevice::new(shared_i2c_v33.clone()),
-            channel.sender(),
+            event_channel.sender(),
         ))
         .unwrap();
     spawner
         .spawn(read_scd_41(
             RcDevice::new(shared_i2c_v33.clone()),
-            channel.sender(),
+            event_channel.sender(),
         ))
         .unwrap();
     spawner
-        .spawn(listen_button(button_pin, channel.sender()))
+        .spawn(listen_button(button_pin, event_channel.sender()))
         .unwrap();
     spawner
-        .spawn(display_data(i2c_v5, channel.receiver()))
+        .spawn(display_data(i2c_v5, event_channel.receiver()))
         .unwrap();
+
+    esp_println::println!("Tasks initialized!");
 }
 
 #[embassy_executor::task]
@@ -181,10 +192,15 @@ async fn listen_button(mut pin: Input<'static>, sender: Sender<'static, NoopRawM
 }
 
 struct Data {
+    // Temperature in Celsius
     temp: f32,
+    // Relative Humidity in percentage
     humidity: f32,
+    // Pressure in hPa
     pressure: f32,
+    // Gas Resistance in Ohms
     gas_resistance: f32,
+    // CO2 concentration in ppm
     co2: u16,
 }
 
@@ -280,7 +296,7 @@ async fn display_data(
             } => {
                 data.temp = temp;
                 data.humidity = humidity;
-                data.pressure = pressure;
+                data.pressure = pressure / 100.0;
                 data.gas_resistance = gas_resistance;
             }
             Events::SCD41 { co2, .. } => {
