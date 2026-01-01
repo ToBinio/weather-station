@@ -95,6 +95,7 @@ checksum = "1c7d78aa5cc3efa061c1514ea12a3e43ef7ece82f784fceb1dd31c12f9d3c011"
 dependencies = [
  "bitfield 0.18.1",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "log",
 ]
 
@@ -428,16 +429,6 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
- "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "embedded-hal-bus"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513e0b3a8fb7d3013a8ae17a834283f170deaf7d0eeab0a7c1a36ad4dd356d22"
-dependencies = [
- "critical-section",
  "embedded-hal 1.0.0",
 ]
 
@@ -1063,6 +1054,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e9f3f5c1fbb71ef8f9de66c2b8c80eea4ad1c4bd27a03cee3baabdb6c43e37"
 dependencies = [
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "ufmt",
  "ufmt-write",
 ]
@@ -1321,6 +1313,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "455974f1daa137284e9e282362d1074f004028a77ee84c6bb1508c9e89646153"
 dependencies = [
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "log",
  "sensirion-i2c",
 ]
@@ -1338,6 +1331,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "640a03c95c176226cf159ae2727f7fe3245546022639d61459af46d2878aec06"
 dependencies = [
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -1624,11 +1618,11 @@ version = "0.1.0"
 dependencies = [
  "bosch-bme680",
  "critical-section",
+ "embassy-embedded-hal",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
- "embedded-hal-bus",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
