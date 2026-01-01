@@ -20,10 +20,12 @@ use esp_hal::Async;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::peripherals::Peripherals;
 use esp_hal::timer::timg::TimerGroup;
 use lcd_lcm1602_i2c::async_lcd::Lcd;
 use scd4x::Scd4xAsync;
 use static_cell::StaticCell;
+use weather_station::wifi::init_wifi;
 
 extern crate alloc;
 
@@ -60,14 +62,7 @@ type EventChannel = Channel<NoopRawMutex, Events, 1>;
 type EventSender = Sender<'static, NoopRawMutex, Events, 1>;
 type EventReceiver = Receiver<'static, NoopRawMutex, Events, 1>;
 
-#[allow(
-    clippy::large_stack_frames,
-    reason = "it's not unusual to allocate larger buffers etc. in main"
-)]
-#[esp_rtos::main]
-async fn main(spawner: Spawner) {
-    // generator version: 1.1.0
-
+fn init_hardware() -> Peripherals {
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -75,16 +70,21 @@ async fn main(spawner: Spawner) {
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 98768);
 
+    peripherals
+}
+
+#[allow(
+    clippy::large_stack_frames,
+    reason = "it's not unusual to allocate larger buffers etc. in main"
+)]
+#[esp_rtos::main]
+async fn main(spawner: Spawner) {
+    let peripherals = init_hardware();
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    esp_println::println!("RTOS initialized!");
-
-    let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
-    let (mut _wifi_controller, _interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
-
+    init_wifi(peripherals.WIFI, &spawner).await;
     esp_println::println!("WiFi initialized!");
 
     let button_pin = Input::new(
@@ -98,7 +98,7 @@ async fn main(spawner: Spawner) {
         .with_sda(peripherals.GPIO21)
         .into_async();
     static I2C_V33_BUS: StaticCell<I2c1BusV33> = StaticCell::new();
-    let i2c_v33_bus = I2C_V33_BUS.init(Mutex::new(i2c_v33));
+    let i2c_v33 = I2C_V33_BUS.init(Mutex::new(i2c_v33));
 
     let i2c_v5 = I2c::new(peripherals.I2C1, I2cConfig::default())
         .unwrap()
@@ -110,10 +110,10 @@ async fn main(spawner: Spawner) {
     let event_channel = CHANNEL.init(Channel::new());
 
     spawner
-        .spawn(read_bme_680(i2c_v33_bus, event_channel.sender()))
+        .spawn(read_bme_680(i2c_v33, event_channel.sender()))
         .unwrap();
     spawner
-        .spawn(read_scd_41(i2c_v33_bus, event_channel.sender()))
+        .spawn(read_scd_41(i2c_v33, event_channel.sender()))
         .unwrap();
     spawner
         .spawn(listen_button(button_pin, event_channel.sender()))
