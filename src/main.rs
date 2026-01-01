@@ -269,14 +269,6 @@ async fn display_data(
     mut i2c: I2c<'static, Blocking>,
     receiver: Receiver<'static, NoopRawMutex, Events, 1>,
 ) {
-    let mut delay = Delay;
-    let mut lcd = Lcd::new(&mut i2c, &mut delay)
-        .with_address(0x27)
-        .with_cursor_on(false)
-        .with_rows(2)
-        .init()
-        .unwrap();
-
     let mut data = Data {
         temp: 0.0,
         humidity: 0.0,
@@ -285,6 +277,16 @@ async fn display_data(
         co2: 0,
     };
     let mut mode = DisplayMode::Temperature;
+
+    let mut delay = Delay;
+    let mut lcd = Lcd::new(&mut i2c, &mut delay)
+        .with_address(0x27)
+        .with_cursor_on(false)
+        .with_rows(2)
+        .init()
+        .unwrap();
+
+    mode.display(&data, &mut lcd);
 
     loop {
         match receiver.receive().await {
