@@ -10,26 +10,10 @@ use esp_radio::wifi::{
 };
 use static_cell::StaticCell;
 
-async fn wait_for_connection(stack: Stack<'_>) {
-    println!("Waiting for link to be up");
-    loop {
-        if stack.is_link_up() {
-            break;
-        }
-        Timer::after(Duration::from_millis(500)).await;
-    }
-
-    println!("Waiting to get IP address...");
-    loop {
-        if let Some(config) = stack.config_v4() {
-            println!("Got IP: {}", config.address);
-            break;
-        }
-        Timer::after(Duration::from_millis(500)).await;
-    }
-}
-
-pub async fn init_wifi(wifi: esp_hal::peripherals::WIFI<'static>, spawner: &Spawner) {
+pub async fn init_wifi(
+    wifi: esp_hal::peripherals::WIFI<'static>,
+    spawner: &Spawner,
+) -> Stack<'static> {
     static RADIO_INIT: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     let radio_init =
         RADIO_INIT.init(esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller"));
@@ -55,7 +39,7 @@ pub async fn init_wifi(wifi: esp_hal::peripherals::WIFI<'static>, spawner: &Spaw
     spawner.spawn(connection(wifi_controller)).ok();
     spawner.spawn(net_task(runner)).ok();
 
-    wait_for_connection(stack).await;
+    stack
 }
 
 #[embassy_executor::task]

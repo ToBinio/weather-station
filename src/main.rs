@@ -25,6 +25,7 @@ use esp_hal::timer::timg::TimerGroup;
 use lcd_lcm1602_i2c::async_lcd::Lcd;
 use scd4x::Scd4xAsync;
 use static_cell::StaticCell;
+use weather_station::ha::{HaSensors, init_ha};
 use weather_station::wifi::init_wifi;
 
 extern crate alloc;
@@ -84,8 +85,10 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    init_wifi(peripherals.WIFI, &spawner).await;
+    let stack = init_wifi(peripherals.WIFI, &spawner).await;
     esp_println::println!("WiFi initialized!");
+
+    let ha_sensors = init_ha(stack, &spawner);
 
     let button_pin = Input::new(
         peripherals.GPIO23,
@@ -119,7 +122,7 @@ async fn main(spawner: Spawner) {
         .spawn(listen_button(button_pin, event_channel.sender()))
         .unwrap();
     spawner
-        .spawn(display_data(i2c_v5, event_channel.receiver()))
+        .spawn(process_data(i2c_v5, ha_sensors, event_channel.receiver()))
         .unwrap();
 
     esp_println::println!("Tasks initialized!");
@@ -135,8 +138,6 @@ async fn read_bme_680(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
         .unwrap();
 
     loop {
-        Timer::after(Duration::from_secs(5)).await;
-
         let data = sensor.measure().await.unwrap();
         sender
             .send(Events::BME680 {
@@ -146,6 +147,8 @@ async fn read_bme_680(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
                 gas_resistance: data.gas_resistance.unwrap_or(0.),
             })
             .await;
+
+        Timer::after(Duration::from_secs(60)).await;
     }
 }
 
@@ -159,7 +162,7 @@ async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
 
     sensor.start_periodic_measurement().await.unwrap();
     loop {
-        Timer::after(Duration::from_secs(5)).await;
+        Timer::after(Duration::from_secs(60)).await;
 
         let data = sensor.measurement().await.unwrap();
         sender
@@ -234,7 +237,11 @@ impl DisplayMode {
 }
 
 #[embassy_executor::task]
-async fn display_data(mut i2c: I2c<'static, Async>, receiver: EventReceiver) {
+async fn process_data(
+    mut i2c: I2c<'static, Async>,
+    mut ha_sensors: HaSensors,
+    receiver: EventReceiver,
+) {
     let mut data = Data {
         temp: 0.0,
         humidity: 0.0,
@@ -267,9 +274,16 @@ async fn display_data(mut i2c: I2c<'static, Async>, receiver: EventReceiver) {
                 data.humidity = humidity;
                 data.pressure = pressure / 100.0;
                 data.gas_resistance = gas_resistance;
+
+                ha_sensors.temperature.publish(data.temp);
+                ha_sensors.humidity.publish(data.humidity);
+                ha_sensors.pressure.publish(data.pressure);
+                ha_sensors.gas_resistance.publish(data.gas_resistance);
             }
             Events::SCD41 { co2, .. } => {
                 data.co2 = co2;
+
+                ha_sensors.co2.publish(data.co2 as f32);
             }
             Events::ButtonPress => {
                 mode = mode.next();

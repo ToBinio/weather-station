@@ -1,11 +1,17 @@
+macro_rules! set_env {
+    ($name:expr) => {
+        if let Ok(value) = std::env::var($name) {
+            println!("cargo:rustc-env={}={}", $name, value);
+        }
+    };
+}
+
 fn main() {
     dotenvy::dotenv().ok();
-    if let Ok(ssid) = std::env::var("SSID") {
-        println!("cargo:rustc-env=SSID={ssid}");
-    }
-    if let Ok(password) = std::env::var("PASSWORD") {
-        println!("cargo:rustc-env=PASSWORD={password}");
-    }
+
+    set_env!("SSID");
+    set_env!("PASSWORD");
+    set_env!("MQTT_ADDRESS");
 
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)

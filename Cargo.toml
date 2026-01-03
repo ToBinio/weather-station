@@ -68,6 +68,7 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
     "socket-udp",
     "dns-max-server-count-4",
 ] }
+embassy-ha = { git= "https://github.com/ToBinio/embassy-ha" }
 
 [build-dependencies]
 dotenvy = "0.15"
