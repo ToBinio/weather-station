@@ -351,7 +351,7 @@ checksum = "dc2d050bdc5c21e0862a89256ed8029ae6c290a93aecefc73084b3002cdebb01"
 [[package]]
 name = "embassy-ha"
 version = "0.2.0"
-source = "git+https://github.com/ToBinio/embassy-ha#3060b85d3496066f07a8c08ae540abbef7bd574f"
+source = "git+https://github.com/ToBinio/embassy-ha#5cc7223d4c1e80bfc97d73a2a3b87fb962c577cf"
 dependencies = [
  "embassy-futures",
  "embassy-net",
@@ -1751,6 +1751,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "lcd-lcm1602-i2c",
+ "log",
  "scd4x",
  "smoltcp",
  "static_cell",

@@ -4,10 +4,10 @@ use embassy_executor::Spawner;
 use embassy_net::{DhcpConfig, Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_hal::rng::Rng;
-use esp_println::println;
 use esp_radio::wifi::{
     ClientConfig, ModeConfig, ScanConfig, WifiController, WifiDevice, WifiEvent, WifiStaState,
 };
+use log::info;
 use static_cell::StaticCell;
 
 pub async fn init_wifi(
@@ -47,8 +47,8 @@ async fn connection(mut controller: WifiController<'static>) {
     const SSID: &str = env!("SSID");
     const PASSWORD: &str = env!("PASSWORD");
 
-    println!("start connection task");
-    println!("Device capabilities: {:?}", controller.capabilities());
+    info!("start connection task");
+    info!("Device capabilities: {:?}", controller.capabilities());
     loop {
         match esp_radio::wifi::sta_state() {
             WifiStaState::Connected => {
@@ -65,26 +65,26 @@ async fn connection(mut controller: WifiController<'static>) {
                     .with_password(PASSWORD.into()),
             );
             controller.set_config(&client_config).unwrap();
-            println!("Starting wifi");
+            info!("Starting wifi");
             controller.start_async().await.unwrap();
-            println!("Wifi started!");
+            info!("Wifi started!");
 
-            println!("Scan");
+            info!("Scan");
             let scan_config = ScanConfig::default().with_max(10);
             let result = controller
                 .scan_with_config_async(scan_config)
                 .await
                 .unwrap();
             for ap in result {
-                println!("{:?}", ap);
+                info!("{:?}", ap);
             }
         }
-        println!("About to connect...");
+        info!("About to connect...");
 
         match controller.connect_async().await {
-            Ok(_) => println!("Wifi connected!"),
+            Ok(_) => info!("Wifi connected!"),
             Err(e) => {
-                println!("Failed to connect to wifi: {:?}", e);
+                info!("Failed to connect to wifi: {:?}", e);
                 Timer::after(Duration::from_millis(5000)).await
             }
         }

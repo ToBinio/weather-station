@@ -6,6 +6,7 @@
     holding buffers for the duration of a data transfer."
 )]
 #![deny(clippy::large_stack_frames)]
+#![deny(clippy::unwrap_used)]
 
 use alloc::string::ToString;
 use bosch_bme680::{AsyncBme680, DeviceAddress};
@@ -23,6 +24,7 @@ use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::Peripherals;
 use esp_hal::timer::timg::TimerGroup;
 use lcd_lcm1602_i2c::async_lcd::Lcd;
+use log::info;
 use scd4x::Scd4xAsync;
 use static_cell::StaticCell;
 use weather_station::ha::{HaSensors, init_ha};
@@ -86,7 +88,7 @@ async fn main(spawner: Spawner) {
     esp_rtos::start(timg0.timer0);
 
     let stack = init_wifi(peripherals.WIFI, &spawner).await;
-    esp_println::println!("WiFi initialized!");
+    info!("WiFi initialized!");
 
     let ha_sensors = init_ha(stack, &spawner);
 
@@ -125,7 +127,7 @@ async fn main(spawner: Spawner) {
         .spawn(process_data(i2c_v5, ha_sensors, event_channel.receiver()))
         .unwrap();
 
-    esp_println::println!("Tasks initialized!");
+    info!("Tasks initialized!");
 }
 
 #[embassy_executor::task]
