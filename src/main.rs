@@ -5,7 +5,6 @@
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
     holding buffers for the duration of a data transfer."
 )]
-#![deny(clippy::large_stack_frames)]
 #![deny(clippy::unwrap_used)]
 
 use alloc::string::ToString;
@@ -24,7 +23,7 @@ use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::Peripherals;
 use esp_hal::timer::timg::TimerGroup;
 use lcd_lcm1602_i2c::async_lcd::Lcd;
-use log::info;
+use log::{info, warn};
 use scd4x::Scd4xAsync;
 use static_cell::StaticCell;
 use weather_station::ha::{HaSensors, init_ha};
@@ -76,10 +75,6 @@ fn init_hardware() -> Peripherals {
     peripherals
 }
 
-#[allow(
-    clippy::large_stack_frames,
-    reason = "it's not unusual to allocate larger buffers etc. in main"
-)]
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     let peripherals = init_hardware();
@@ -98,7 +93,7 @@ async fn main(spawner: Spawner) {
     );
 
     let i2c_v33 = I2c::new(peripherals.I2C0, I2cConfig::default())
-        .unwrap()
+        .expect("Failed to initialize I2C0")
         .with_scl(peripherals.GPIO22)
         .with_sda(peripherals.GPIO21)
         .into_async();
@@ -106,7 +101,7 @@ async fn main(spawner: Spawner) {
     let i2c_v33 = I2C_V33_BUS.init(Mutex::new(i2c_v33));
 
     let i2c_v5 = I2c::new(peripherals.I2C1, I2cConfig::default())
-        .unwrap()
+        .expect("Failed to initialize I2C1")
         .with_scl(peripherals.GPIO26)
         .with_sda(peripherals.GPIO25)
         .into_async();
@@ -116,64 +111,102 @@ async fn main(spawner: Spawner) {
 
     spawner
         .spawn(read_bme_680(i2c_v33, event_channel.sender()))
-        .unwrap();
+        .expect("Failed to spawn read_bme_680 task");
     spawner
         .spawn(read_scd_41(i2c_v33, event_channel.sender()))
-        .unwrap();
+        .expect("Failed to spawn read_scd_41 task");
     spawner
         .spawn(listen_button(button_pin, event_channel.sender()))
-        .unwrap();
+        .expect("Failed to spawn listen_button task");
     spawner
         .spawn(process_data(i2c_v5, ha_sensors, event_channel.receiver()))
-        .unwrap();
+        .expect("Failed to spawn process_data task");
 
     info!("Tasks initialized!");
 }
 
-#[embassy_executor::task]
-async fn read_bme_680(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
+async fn init_bme680(
+    i2c_bus: &'static I2c1BusV33,
+) -> AsyncBme680<I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>, Delay> {
     let i2c = I2cDevice::new(i2c_bus);
     let mut sensor = AsyncBme680::new(i2c, DeviceAddress::Primary, Delay, 20);
     sensor
         .initialize(&bosch_bme680::Configuration::default())
         .await
-        .unwrap();
+        .expect("Failed to initialize BME680 sensor");
+
+    sensor
+}
+
+#[embassy_executor::task]
+async fn read_bme_680(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
+    let mut sensor = init_bme680(i2c_bus).await;
 
     loop {
-        let data = sensor.measure().await.unwrap();
-        sender
-            .send(Events::BME680 {
-                temp: data.temperature,
-                humidity: data.humidity,
-                pressure: data.pressure,
-                gas_resistance: data.gas_resistance.unwrap_or(0.),
-            })
-            .await;
+        match sensor.measure().await {
+            Ok(data) => {
+                sender
+                    .send(Events::BME680 {
+                        temp: data.temperature,
+                        humidity: data.humidity,
+                        pressure: data.pressure,
+                        gas_resistance: data.gas_resistance.unwrap_or(0.),
+                    })
+                    .await;
+            }
+            Err(err) => {
+                warn!("Failed to read BME680 sensor - {:?}", err);
+            }
+        }
 
         Timer::after(Duration::from_secs(60)).await;
     }
 }
 
-#[embassy_executor::task]
-async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
+async fn init_scd_41(
+    i2c_bus: &'static I2c1BusV33,
+) -> Scd4xAsync<I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>, Delay> {
     let i2c = I2cDevice::new(i2c_bus);
     let mut sensor = Scd4xAsync::new(i2c, Delay);
     sensor.wake_up().await;
-    sensor.stop_periodic_measurement().await.unwrap();
-    sensor.reinit().await.unwrap();
+    sensor
+        .stop_periodic_measurement()
+        .await
+        .expect("Failed to stop periodic measurement");
+    sensor
+        .reinit()
+        .await
+        .expect("Failed to reinitialize sensor");
 
-    sensor.start_periodic_measurement().await.unwrap();
+    sensor
+        .start_periodic_measurement()
+        .await
+        .expect("Failed to start periodic measurement");
+
+    sensor
+}
+
+#[embassy_executor::task]
+async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
+    let mut sensor = init_scd_41(i2c_bus).await;
+
     loop {
         Timer::after(Duration::from_secs(60)).await;
 
-        let data = sensor.measurement().await.unwrap();
-        sender
-            .send(Events::SCD41 {
-                co2: data.co2,
-                temperature: data.temperature,
-                humidity: data.humidity,
-            })
-            .await;
+        match sensor.measurement().await {
+            Ok(data) => {
+                sender
+                    .send(Events::SCD41 {
+                        co2: data.co2,
+                        temperature: data.temperature,
+                        humidity: data.humidity,
+                    })
+                    .await;
+            }
+            Err(err) => {
+                warn!("Failed to read SCD41 sensor - {:?}", err);
+            }
+        }
     }
 }
 
@@ -209,7 +242,11 @@ enum DisplayMode {
 }
 
 impl DisplayMode {
-    async fn display(&self, data: &Data, lcd: &mut Lcd<'_, I2c<'static, Async>, Delay>) {
+    async fn display(
+        &self,
+        data: &Data,
+        lcd: &mut Lcd<'_, I2c<'static, Async>, Delay>,
+    ) -> Result<(), esp_hal::i2c::master::Error> {
         let (header, value, unit) = match self {
             DisplayMode::Temperature => ("Temperature", &data.temp.to_string(), "C"),
             DisplayMode::Humidity => ("Humidity", &data.humidity.to_string(), "%"),
@@ -220,11 +257,13 @@ impl DisplayMode {
             }
         };
 
-        lcd.clear().await.unwrap();
-        lcd.write_str(header).await.unwrap();
-        lcd.set_cursor(1, 0).await.unwrap();
-        lcd.write_str(value).await.unwrap();
-        lcd.write_str(unit).await.unwrap();
+        lcd.clear().await?;
+        lcd.write_str(header).await?;
+        lcd.set_cursor(1, 0).await?;
+        lcd.write_str(value).await?;
+        lcd.write_str(unit).await?;
+
+        Ok(())
     }
 
     fn next(self) -> DisplayMode {
@@ -260,9 +299,11 @@ async fn process_data(
         .with_rows(2)
         .init()
         .await
-        .unwrap();
+        .expect("Failed to initialize LCD");
 
-    mode.display(&data, &mut lcd).await;
+    mode.display(&data, &mut lcd)
+        .await
+        .expect("Failed to display initial mode");
 
     loop {
         match receiver.receive().await {
@@ -292,6 +333,8 @@ async fn process_data(
             }
         }
 
-        mode.display(&data, &mut lcd).await;
+        if let Err(err) = mode.display(&data, &mut lcd).await {
+            warn!("Failed to display mode: {}", err);
+        };
     }
 }
