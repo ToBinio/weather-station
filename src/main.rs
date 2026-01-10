@@ -16,12 +16,13 @@ use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
 use esp_backtrace as _;
-use esp_hal::Async;
+use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
-use esp_hal::peripherals::Peripherals;
+use esp_hal::peripherals::{ADC1, GPIO32, Peripherals};
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{Async, Blocking};
 use lcd_lcm1602_i2c::async_lcd::Lcd;
 use log::{info, warn};
 use scd4x::Scd4xAsync;
@@ -109,6 +110,10 @@ async fn main(spawner: Spawner) {
     static CHANNEL: StaticCell<EventChannel> = StaticCell::new();
     let event_channel = CHANNEL.init(Channel::new());
 
+    let mut config = AdcConfig::new();
+    let pin = config.enable_pin(peripherals.GPIO32, esp_hal::analog::adc::Attenuation::_11dB);
+    let adc = Adc::new(peripherals.ADC1, config);
+
     spawner
         .spawn(read_bme_680(i2c_v33, event_channel.sender()))
         .expect("Failed to spawn read_bme_680 task");
@@ -121,6 +126,9 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(process_data(i2c_v5, ha_sensors, event_channel.receiver()))
         .expect("Failed to spawn process_data task");
+    spawner
+        .spawn(dim_lcd_backlight(adc, pin))
+        .expect("Failed to spawn read_adc task");
 
     info!("Tasks initialized!");
 }
@@ -274,6 +282,26 @@ impl DisplayMode {
             DisplayMode::GasResistance => DisplayMode::CO2,
             DisplayMode::CO2 => DisplayMode::Temperature,
         }
+    }
+}
+
+#[embassy_executor::task]
+async fn dim_lcd_backlight(
+    mut adc: Adc<'static, ADC1<'static>, Blocking>,
+    mut pin: AdcPin<GPIO32<'static>, ADC1<'static>>,
+) {
+    loop {
+        match adc.read_oneshot(&mut pin) {
+            Ok(value) => {
+                info!("ADC value: {}", value);
+            }
+            Err(nb::Error::WouldBlock) => {}
+            Err(nb::Error::Other(err)) => {
+                warn!("Failed to read ADC value - {:?}", err);
+            }
+        }
+
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
 
