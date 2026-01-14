@@ -20,7 +20,10 @@ use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::mcpwm::operator::PwmPinConfig;
+use esp_hal::mcpwm::{McPwm, PeripheralClockConfig};
 use esp_hal::peripherals::{ADC1, GPIO32, Peripherals};
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{Async, Blocking};
 use lcd_lcm1602_i2c::async_lcd::Lcd;
@@ -109,6 +112,26 @@ async fn main(spawner: Spawner) {
 
     static CHANNEL: StaticCell<EventChannel> = StaticCell::new();
     let event_channel = CHANNEL.init(Channel::new());
+
+    let clock_config = PeripheralClockConfig::with_prescaler(100);
+    let mut mcpw = McPwm::new(peripherals.MCPWM0, clock_config);
+    mcpw.operator0.set_timer(&mcpw.timer0);
+
+    let mut pwm_pin = mcpw
+        .operator0
+        .with_pin_a(peripherals.GPIO19, PwmPinConfig::UP_DOWN_ACTIVE_HIGH);
+
+    mcpw.timer0.start(
+        clock_config
+            .timer_clock_with_frequency(
+                99,
+                esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
+                Rate::from_khz(1),
+            )
+            .unwrap(),
+    );
+
+    pwm_pin.set_timestamp(50);
 
     let mut config = AdcConfig::new();
     let pin = config.enable_pin(peripherals.GPIO32, esp_hal::analog::adc::Attenuation::_11dB);

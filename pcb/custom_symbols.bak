@@ -186,8 +186,8 @@
 				)
 			)
 		)
-		(property "Value" "HD44780_I2C"
-			(at 11.938 0 0)
+		(property "Value" "1602A_LCD_I2C"
+			(at 13.208 0 0)
 			(effects
 				(font
 					(size 1.27 1.27)
