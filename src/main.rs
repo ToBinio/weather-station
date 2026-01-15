@@ -16,16 +16,16 @@ use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
 use esp_backtrace as _;
-use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin};
+use esp_hal::Async;
+use esp_hal::analog::adc::{Adc, AdcConfig};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::mcpwm::operator::PwmPinConfig;
 use esp_hal::mcpwm::{McPwm, PeripheralClockConfig};
-use esp_hal::peripherals::{ADC1, GPIO32, Peripherals};
+use esp_hal::peripherals::{ADC1, GPIO19, GPIO23, GPIO32, MCPWM0, Peripherals};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{Async, Blocking};
 use lcd_lcm1602_i2c::async_lcd::Lcd;
 use log::{info, warn};
 use scd4x::Scd4xAsync;
@@ -91,11 +91,6 @@ async fn main(spawner: Spawner) {
 
     let ha_sensors = init_ha(stack, &spawner);
 
-    let button_pin = Input::new(
-        peripherals.GPIO23,
-        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
-    );
-
     let i2c_v33 = I2c::new(peripherals.I2C0, I2cConfig::default())
         .expect("Failed to initialize I2C0")
         .with_scl(peripherals.GPIO22)
@@ -113,30 +108,6 @@ async fn main(spawner: Spawner) {
     static CHANNEL: StaticCell<EventChannel> = StaticCell::new();
     let event_channel = CHANNEL.init(Channel::new());
 
-    let clock_config = PeripheralClockConfig::with_prescaler(100);
-    let mut mcpw = McPwm::new(peripherals.MCPWM0, clock_config);
-    mcpw.operator0.set_timer(&mcpw.timer0);
-
-    let mut pwm_pin = mcpw
-        .operator0
-        .with_pin_a(peripherals.GPIO19, PwmPinConfig::UP_DOWN_ACTIVE_HIGH);
-
-    mcpw.timer0.start(
-        clock_config
-            .timer_clock_with_frequency(
-                99,
-                esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
-                Rate::from_khz(1),
-            )
-            .unwrap(),
-    );
-
-    pwm_pin.set_timestamp(50);
-
-    let mut config = AdcConfig::new();
-    let pin = config.enable_pin(peripherals.GPIO32, esp_hal::analog::adc::Attenuation::_11dB);
-    let adc = Adc::new(peripherals.ADC1, config);
-
     spawner
         .spawn(read_bme_680(i2c_v33, event_channel.sender()))
         .expect("Failed to spawn read_bme_680 task");
@@ -144,13 +115,18 @@ async fn main(spawner: Spawner) {
         .spawn(read_scd_41(i2c_v33, event_channel.sender()))
         .expect("Failed to spawn read_scd_41 task");
     spawner
-        .spawn(listen_button(button_pin, event_channel.sender()))
+        .spawn(listen_button(peripherals.GPIO23, event_channel.sender()))
         .expect("Failed to spawn listen_button task");
     spawner
         .spawn(process_data(i2c_v5, ha_sensors, event_channel.receiver()))
         .expect("Failed to spawn process_data task");
     spawner
-        .spawn(dim_lcd_backlight(adc, pin))
+        .spawn(dim_lcd_backlight(
+            peripherals.GPIO32,
+            peripherals.ADC1,
+            peripherals.GPIO19,
+            peripherals.MCPWM0,
+        ))
         .expect("Failed to spawn read_adc task");
 
     info!("Tasks initialized!");
@@ -242,10 +218,15 @@ async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
 }
 
 #[embassy_executor::task]
-async fn listen_button(mut pin: Input<'static>, sender: EventSender) {
+async fn listen_button(pin: GPIO23<'static>, sender: EventSender) {
+    let mut button_pin = Input::new(
+        pin,
+        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
+    );
+
     loop {
-        pin.wait_for_high().await;
-        pin.wait_for_low().await;
+        button_pin.wait_for_high().await;
+        button_pin.wait_for_low().await;
 
         sender.send(Events::ButtonPress).await;
     }
@@ -310,13 +291,45 @@ impl DisplayMode {
 
 #[embassy_executor::task]
 async fn dim_lcd_backlight(
-    mut adc: Adc<'static, ADC1<'static>, Blocking>,
-    mut pin: AdcPin<GPIO32<'static>, ADC1<'static>>,
+    adc_pin: GPIO32<'static>,
+    adc: ADC1<'static>,
+    dim_pin: GPIO19<'static>,
+    mcpwm: MCPWM0<'static>,
 ) {
+    //configure PWM
+    let clock_config = PeripheralClockConfig::with_prescaler(100);
+    let mut mcpw = McPwm::new(mcpwm, clock_config);
+    mcpw.operator0.set_timer(&mcpw.timer0);
+
+    let mut pwm_pin = mcpw
+        .operator0
+        .with_pin_a(dim_pin, PwmPinConfig::UP_DOWN_ACTIVE_HIGH);
+
+    mcpw.timer0.start(
+        clock_config
+            .timer_clock_with_frequency(
+                99,
+                esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
+                Rate::from_khz(1),
+            )
+            .expect("Failed to create timer config"),
+    );
+
+    //configure ADC
+    let mut config = AdcConfig::new();
+    let mut adc_pin = config.enable_pin(adc_pin, esp_hal::analog::adc::Attenuation::_11dB);
+    let mut adc = Adc::new(adc, config);
+
+    let mut smoothed_value = 4096. / 2.;
     loop {
-        match adc.read_oneshot(&mut pin) {
+        match adc.read_oneshot(&mut adc_pin) {
             Ok(value) => {
-                info!("ADC value: {}", value);
+                let value = value as f32 / 4096.0;
+                smoothed_value = (value + smoothed_value * 9.) / 10.;
+
+                info!("ADC value: {} - smooth_value: {}", value, smoothed_value);
+
+                pwm_pin.set_timestamp((smoothed_value * 100.) as u16);
             }
             Err(nb::Error::WouldBlock) => {}
             Err(nb::Error::Other(err)) => {
@@ -324,7 +337,7 @@ async fn dim_lcd_backlight(
             }
         }
 
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
