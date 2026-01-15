@@ -297,20 +297,20 @@ async fn dim_lcd_backlight(
     mcpwm: MCPWM0<'static>,
 ) {
     //configure PWM
-    let clock_config = PeripheralClockConfig::with_prescaler(100);
+    let clock_config = PeripheralClockConfig::with_frequency(Rate::from_mhz(40)).unwrap();
     let mut mcpw = McPwm::new(mcpwm, clock_config);
     mcpw.operator0.set_timer(&mcpw.timer0);
 
     let mut pwm_pin = mcpw
         .operator0
-        .with_pin_a(dim_pin, PwmPinConfig::UP_DOWN_ACTIVE_HIGH);
+        .with_pin_a(dim_pin, PwmPinConfig::UP_ACTIVE_HIGH);
 
     mcpw.timer0.start(
         clock_config
             .timer_clock_with_frequency(
                 99,
                 esp_hal::mcpwm::timer::PwmWorkingMode::Increase,
-                Rate::from_khz(1),
+                Rate::from_khz(20),
             )
             .expect("Failed to create timer config"),
     );
@@ -320,7 +320,7 @@ async fn dim_lcd_backlight(
     let mut adc_pin = config.enable_pin(adc_pin, esp_hal::analog::adc::Attenuation::_11dB);
     let mut adc = Adc::new(adc, config);
 
-    let mut smoothed_value = 4096. / 2.;
+    let mut smoothed_value = 0.5;
     loop {
         match adc.read_oneshot(&mut adc_pin) {
             Ok(value) => {
