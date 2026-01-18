@@ -326,9 +326,6 @@ async fn dim_lcd_backlight(
             Ok(value) => {
                 let value = value as f32 / 4096.0;
                 smoothed_value = (value + smoothed_value * 9.) / 10.;
-
-                info!("ADC value: {} - smooth_value: {}", value, smoothed_value);
-
                 pwm_pin.set_timestamp((smoothed_value * 100.) as u16);
             }
             Err(nb::Error::WouldBlock) => {}
