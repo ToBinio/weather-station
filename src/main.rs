@@ -198,7 +198,7 @@ async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
     let mut sensor = init_scd_41(i2c_bus).await;
 
     loop {
-        Timer::after(Duration::from_secs(60)).await;
+        Timer::after(Duration::from_secs(5)).await;
 
         match sensor.measurement().await {
             Ok(data) => {
@@ -214,6 +214,8 @@ async fn read_scd_41(i2c_bus: &'static I2c1BusV33, sender: EventSender) {
                 warn!("Failed to read SCD41 sensor - {:?}", err);
             }
         }
+
+        Timer::after(Duration::from_secs(55)).await;
     }
 }
 
